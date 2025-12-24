@@ -13,6 +13,7 @@ type configuration = {
   astprints: language list;
   ppflags: pp_flag list;
   ppouts: (language * string) list;
+  json_core_out: string option;
   typecheck_core: bool;
   rewrite_core: bool;
   sequentialise_core: bool;

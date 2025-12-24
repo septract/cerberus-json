@@ -75,6 +75,7 @@ type configuration = {
   astprints: language list;
   ppflags: pp_flag list;
   ppouts: (language * string) list;
+  json_core_out: string option;
   typecheck_core: bool;
   rewrite_core: bool;
   sequentialise_core: bool;
@@ -548,6 +549,24 @@ let print_core (conf, io) ~filename core_file =
         Cerb_colour.do_colour := saved;
         ret in
       io.run_pp fout_opt (pp_file core_file)
+  end >>= fun () ->
+  (* JSON Core output - mirrors the pp_core block above *)
+  (* Annot flag controls whether to include stdlib/header definitions *)
+  whenM (Option.is_some conf.json_core_out) begin
+      fun () ->
+      let json_file =
+        if List.mem Annot conf.ppflags then
+          Json_core.All.json_file
+        else
+          Json_core.Basic.json_file
+      in
+      let json = json_file core_file in
+      let json_str = Yojson.Safe.pretty_to_string json in
+      let path = Option.get conf.json_core_out in
+      let oc = open_out path in
+      output_string oc json_str;
+      close_out oc;
+      return ()
   end >>= fun () ->
   return core_file
 
