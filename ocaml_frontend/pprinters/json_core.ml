@@ -197,14 +197,19 @@ let rec json_object_value = function
       obj "OVfloating" [("value",
         Impl_mem.case_fval fval
           (fun () -> `String "unspecified")
-          (fun f -> `Float f))]
+          (fun f ->
+            (* Handle special float values that aren't valid JSON *)
+            if f <> f then `String "NaN"  (* NaN is the only float not equal to itself *)
+            else if f = infinity then `String "Infinity"
+            else if f = neg_infinity then `String "-Infinity"
+            else `Float f))]
   | OVpointer pval ->
       obj "OVpointer" [("value", `String (pp_to_string (Impl_mem.pp_pointer_value pval)))]
   | OVarray lvals ->
       obj "OVarray" [("elements", `List (List.map json_loaded_value lvals))]
   | OVstruct (tag, members) ->
       obj "OVstruct" [
-        ("tag", json_sym tag);
+        ("struct_tag", json_sym tag);
         ("members", `List (List.map (fun (id, cty, mval) ->
           `Assoc [
             ("name", json_identifier id);
@@ -214,7 +219,7 @@ let rec json_object_value = function
       ]
   | OVunion (tag, id, mval) ->
       obj "OVunion" [
-        ("tag", json_sym tag);
+        ("union_tag", json_sym tag);
         ("member", json_identifier id);
         ("value", `String (pp_to_string (Impl_mem.pp_mem_value mval)))
       ]
@@ -305,7 +310,7 @@ let rec json_pexpr (Pexpr (annots, _, pe_)) =
     | PEmember_shift (pe, tag, id) ->
         obj "PEmember_shift" [
           ("ptr", json_pexpr pe);
-          ("tag", json_sym tag);
+          ("struct_tag", json_sym tag);
           ("member", json_identifier id)
         ]
     | PEmemop (op, pes) ->
@@ -342,14 +347,14 @@ let rec json_pexpr (Pexpr (annots, _, pe_)) =
         ]
     | PEstruct (tag, members) ->
         obj "PEstruct" [
-          ("tag", json_sym tag);
+          ("struct_tag", json_sym tag);
           ("members", `List (List.map (fun (id, pe) ->
             `Assoc [("name", json_identifier id); ("value", json_pexpr pe)]
           ) members))
         ]
     | PEunion (tag, id, pe) ->
         obj "PEunion" [
-          ("tag", json_sym tag);
+          ("union_tag", json_sym tag);
           ("member", json_identifier id);
           ("value", json_pexpr pe)
         ]
@@ -357,7 +362,7 @@ let rec json_pexpr (Pexpr (annots, _, pe_)) =
         obj "PEcfunction" [("expr", json_pexpr pe)]
     | PEmemberof (tag, id, pe) ->
         obj "PEmemberof" [
-          ("tag", json_sym tag);
+          ("member_tag", json_sym tag);
           ("member", json_identifier id);
           ("expr", json_pexpr pe)
         ]
