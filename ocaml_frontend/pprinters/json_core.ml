@@ -35,7 +35,7 @@ let json_cond loc (json_fn : unit -> Yojson.Safe.t) : Yojson.Safe.t option =
 (* Helper to convert PPrint document to string *)
 let pp_to_string doc = Pp_utils.to_plain_string doc
 
-(* Symbols and identifiers *)
+(* Symbols and identifiers - matches pp_symbol.ml to_string_pretty *)
 let json_sym (sym : Symbol.sym) : Yojson.Safe.t =
   let Symbol.Symbol (_, n, sd) = sym in
   let name = match sd with
@@ -45,8 +45,8 @@ let json_sym (sym : Symbol.sym) : Yojson.Safe.t =
     | Symbol.SD_Return -> "return"
     | Symbol.SD_FunArg (_, i) -> Printf.sprintf "arg_%d" i
     | Symbol.SD_FunArgValue name -> name
-    | Symbol.SD_unnamed_tag _ -> Printf.sprintf "__anon_tag_%d" n
-    | Symbol.SD_None -> Printf.sprintf "sym_%d" n
+    | Symbol.SD_unnamed_tag _ -> Printf.sprintf "__cerbty_unnamed_tag_%d" n
+    | Symbol.SD_None -> Printf.sprintf "a_%d" n  (* matches pp_symbol.ml *)
   in
   `Assoc [
     ("id", `Int n);
