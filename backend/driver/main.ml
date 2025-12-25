@@ -97,7 +97,7 @@ let cerberus debug_level progress core_obj
              link_lib_path link_core_obj
              impl_name
              exec exec_mode iso_switches switches batch concurrency
-             astprints pprints ppflags pp_ail_out pp_core_out json_core_out
+             astprints pprints ppflags pp_ail_out pp_core_out pp_core_compact json_core_out
              sequentialise_core rewrite_core typecheck_core defacto permissive ignore_bitfields
              fs_dump fs trace
              output_name
@@ -122,7 +122,7 @@ let cerberus debug_level progress core_obj
       | None -> ppouts in
   (* set global configuration *)
   set_cerb_conf ~backend_name:"Driver" ~exec exec_mode ~concurrency QuoteStd ~defacto ~permissive ~agnostic ~ignore_bitfields;
-  let conf = { astprints; pprints; ppflags; ppouts; json_core_out; debug_level; typecheck_core;
+  let conf = { astprints; pprints; ppflags; ppouts; json_core_out; pp_core_compact; debug_level; typecheck_core;
                rewrite_core; sequentialise_core; cpp_cmd; cpp_stderr = true; cpp_save = None } in
   let prelude =
     (* Looking for and parsing the core standard library *)
@@ -436,6 +436,10 @@ let pp_core_out =
   let doc = "Write Core pprint to a file." in
   Arg.(value & opt (some string) None & info ["pp_core_out"] ~doc)
 
+let pp_core_compact =
+  let doc = "Use compact rendering for Core pprint (no line breaks, for comparison testing)." in
+  Arg.(value & flag & info ["pp_core_compact"] ~doc)
+
 let json_core_out =
   let doc = "Write Core as JSON to a file." in
   Arg.(value & opt (some string) None & info ["json_core_out"] ~doc)
@@ -511,7 +515,7 @@ let () =
                          impl $
                          exec $ exec_mode $ iso $ switches $ batch $
                          concurrency $
-                         astprints $ pprints $ ppflags $ pp_ail_out $ pp_core_out $ json_core_out $
+                         astprints $ pprints $ ppflags $ pp_ail_out $ pp_core_out $ pp_core_compact $ json_core_out $
                          sequentialise $ rewrite $ typecheck_core $ defacto $ permissive $ ignore_bitfields $
                          fs_dump $ fs $ trace $
                          output_file $

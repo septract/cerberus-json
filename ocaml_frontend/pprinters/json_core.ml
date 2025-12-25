@@ -102,12 +102,96 @@ let json_name = function
   | Sym sym -> obj "Sym" [("symbol", json_sym sym)]
   | Impl ic -> obj "Impl" [("constant", `String (Implementation.string_of_implementation_constant ic))]
 
-(* C types - simplified representation *)
-let json_ctype (ty : Ctype.ctype) : Yojson.Safe.t =
-  `String (String_core_ctype.string_of_ctype ty)
+(* Qualifiers *)
+let json_qualifiers (q : Ctype.qualifiers) : Yojson.Safe.t =
+  `Assoc [
+    ("const", `Bool q.const);
+    ("restrict", `Bool q.restrict);
+    ("volatile", `Bool q.volatile)
+  ]
 
-let json_integer_type (ity : Ctype.integerType) : Yojson.Safe.t =
-  `String (pp_to_string (Pp_core_ctype.pp_integer_ctype ity))
+(* Integer types - structured representation *)
+let json_integer_type_struct (ity : Ctype.integerType) : Yojson.Safe.t =
+  match ity with
+  | Char -> obj_only "Char"
+  | Bool -> obj_only "Bool"
+  | Signed sik -> obj "Signed" [("kind",
+      match sik with
+      | Ichar -> `String "Ichar"
+      | Short -> `String "Short"
+      | Int_ -> `String "Int_"
+      | Long -> `String "Long"
+      | LongLong -> `String "LongLong"
+      | IntN_t n -> obj "IntN_t" [("bits", `Int n)]
+      | Int_leastN_t n -> obj "Int_leastN_t" [("bits", `Int n)]
+      | Int_fastN_t n -> obj "Int_fastN_t" [("bits", `Int n)]
+      | Intmax_t -> `String "Intmax_t"
+      | Intptr_t -> `String "Intptr_t"
+    )]
+  | Unsigned ibty -> obj "Unsigned" [("kind",
+      match ibty with
+      | Ichar -> `String "Ichar"
+      | Short -> `String "Short"
+      | Int_ -> `String "Int_"
+      | Long -> `String "Long"
+      | LongLong -> `String "LongLong"
+      | IntN_t n -> obj "IntN_t" [("bits", `Int n)]
+      | Int_leastN_t n -> obj "Int_leastN_t" [("bits", `Int n)]
+      | Int_fastN_t n -> obj "Int_fastN_t" [("bits", `Int n)]
+      | Intmax_t -> `String "Intmax_t"
+      | Intptr_t -> `String "Intptr_t"
+    )]
+  | Enum sym -> obj "Enum" [("tag", json_sym sym)]
+  | Size_t -> obj_only "Size_t"
+  | Wchar_t -> obj_only "Wchar_t"
+  | Wint_t -> obj_only "Wint_t"
+  | Ptrdiff_t -> obj_only "Ptrdiff_t"
+  | Ptraddr_t -> obj_only "Ptraddr_t"
+
+(* Basic types *)
+let json_basic_type (bty : Ctype.basicType) : Yojson.Safe.t =
+  match bty with
+  | Integer ity -> obj "Integer" [("int_type", json_integer_type_struct ity)]
+  | Floating (RealFloating rfty) -> obj "Floating" [("float_type",
+      match rfty with
+      | Float -> `String "Float"
+      | Double -> `String "Double"
+      | LongDouble -> `String "LongDouble"
+    )]
+
+(* C types - structured representation *)
+let rec json_ctype (ty : Ctype.ctype) : Yojson.Safe.t =
+  let Ctype.Ctype (_, ty_) = ty in
+  json_ctype_ ty_
+
+and json_ctype_ (ty_ : Ctype.ctype_) : Yojson.Safe.t =
+  match ty_ with
+  | Void -> obj_only "Void"
+  | Basic bty -> obj "Basic" [("basic_type", json_basic_type bty)]
+  | Array (elem_ty, size_opt) -> obj "Array" [
+      ("element_type", json_ctype elem_ty);
+      ("size", match size_opt with Some n -> `Int (Nat_big_num.to_int n) | None -> `Null)
+    ]
+  | Function ((ret_quals, ret_ty), params, is_variadic) -> obj "Function" [
+      ("return_type", json_ctype ret_ty);
+      ("return_qualifiers", json_qualifiers ret_quals);
+      ("params", `List (List.map (fun (quals, ty, _is_reg) ->
+        `Assoc [("qualifiers", json_qualifiers quals); ("type", json_ctype ty)]
+      ) params));
+      ("variadic", `Bool is_variadic)
+    ]
+  | FunctionNoParams (ret_quals, ret_ty) -> obj "FunctionNoParams" [
+      ("return_type", json_ctype ret_ty);
+      ("return_qualifiers", json_qualifiers ret_quals)
+    ]
+  | Pointer (quals, pointee_ty) -> obj "Pointer" [
+      ("qualifiers", json_qualifiers quals);
+      ("pointee_type", json_ctype pointee_ty)
+    ]
+  | Atomic inner_ty -> obj "Atomic" [("inner_type", json_ctype inner_ty)]
+  | Struct sym -> obj "Struct" [("struct_tag", json_sym sym)]
+  | Union sym -> obj "Union" [("union_tag", json_sym sym)]
+  | Byte -> obj_only "Byte"
 
 (* Constructors *)
 let json_ctor = function
@@ -328,19 +412,19 @@ let rec json_pexpr (Pexpr (annots, _, pe_)) =
         ]
     | PEconv_int (ity, pe) ->
         obj "PEconv_int" [
-          ("type", json_integer_type ity);
+          ("type", json_integer_type_struct ity);
           ("expr", json_pexpr pe)
         ]
     | PEwrapI (ity, iop, pe1, pe2) ->
         obj "PEwrapI" [
-          ("type", json_integer_type ity);
+          ("type", json_integer_type_struct ity);
           ("op", json_iop iop);
           ("left", json_pexpr pe1);
           ("right", json_pexpr pe2)
         ]
     | PEcatch_exceptional_condition (ity, iop, pe1, pe2) ->
         obj "PEcatch_exceptional_condition" [
-          ("type", json_integer_type ity);
+          ("type", json_integer_type_struct ity);
           ("op", json_iop iop);
           ("left", json_pexpr pe1);
           ("right", json_pexpr pe2)
@@ -666,8 +750,10 @@ let json_fun_map_decl decl =
         ])
 
 (* Function map - mirrors pp_fun_map in pp_core.ml *)
+(* Note: Pmap.fold iterates in key order, and pp_core uses acc ^^ new (append),
+   so we prepend to accumulator and reverse at the end to get the same order *)
 let json_fun_map funs =
-  Pmap.fold (fun sym decl acc ->
+  List.rev @@ Pmap.fold (fun sym decl acc ->
     match json_fun_map_decl decl with
     | Some json_decl ->
         `Assoc [

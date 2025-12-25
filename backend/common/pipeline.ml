@@ -76,6 +76,7 @@ type configuration = {
   ppflags: pp_flag list;
   ppouts: (language * string) list;
   json_core_out: string option;
+  pp_core_compact: bool;
   typecheck_core: bool;
   rewrite_core: bool;
   sequentialise_core: bool;
@@ -529,6 +530,19 @@ let typed_core_passes (conf, io) core_file =
       typed_core_file' in
   return (untype_file typed_core_file'', typed_core_file'')
 
+let run_pp_compact fout_opt doc =
+  let (is_fout, oc) =
+    match fout_opt with
+      | Some filename -> true, Stdlib.open_out filename
+      | None -> false, Stdlib.stdout in
+  let saved = !Cerb_colour.do_colour in
+  Cerb_colour.do_colour := false;  (* disable colour for compact output *)
+  PPrint.ToChannel.compact oc doc;
+  output_char oc '\n';  (* add trailing newline *)
+  if is_fout then
+    close_out oc;
+  Cerb_colour.do_colour := saved
+
 let print_core (conf, io) ~filename core_file =
   whenM (List.mem Core conf.astprints) begin
     fun () ->
@@ -548,7 +562,12 @@ let print_core (conf, io) ~filename core_file =
                   ) file in
         Cerb_colour.do_colour := saved;
         ret in
-      io.run_pp fout_opt (pp_file core_file)
+      (* Use compact rendering if requested *)
+      if conf.pp_core_compact then begin
+        run_pp_compact fout_opt (pp_file core_file);
+        return ()
+      end else
+        io.run_pp fout_opt (pp_file core_file)
   end >>= fun () ->
   (* JSON Core output - mirrors the pp_core block above *)
   (* Annot flag controls whether to include stdlib/header definitions *)

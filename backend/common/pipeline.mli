@@ -14,6 +14,7 @@ type configuration = {
   ppflags: pp_flag list;
   ppouts: (language * string) list;
   json_core_out: string option;
+  pp_core_compact: bool;
   typecheck_core: bool;
   rewrite_core: bool;
   sequentialise_core: bool;
