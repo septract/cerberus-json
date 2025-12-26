@@ -9,6 +9,9 @@ open Cerb_colour
 
 open Cerb_pp_prelude
 
+(* When true, always wrap binary ops in parens (for compact mode comparison testing) *)
+let always_paren_binops = ref false
+
 module type CONFIG =
 sig
   val show_std: bool
@@ -435,7 +438,9 @@ let pp_pexpr pe =
     let prec' = precedence_pexpr pe in
     let pp z = P.group (pp prec' z) in
     (maybe_print_location annot) ^^
-    (if compare_precedence prec' prec then fun z -> z else P.parens)
+    (* When always_paren_binops is true, we handle parens ourselves in PEop,
+       so disable precedence-based wrapping *)
+    (if !always_paren_binops || compare_precedence prec' prec then fun z -> z else P.parens)
     begin P.group begin match pe with
       | PEundef (_, ub) ->
           pp_keyword "undef" ^^ P.parens (P.angles (P.angles (
@@ -498,7 +503,8 @@ let pp_pexpr pe =
       | PEnot pe ->
           pp_keyword "not" ^^ P.parens (pp pe)
       | PEop (bop, pe1, pe2) ->
-          pp pe1 ^^^ pp_binop bop ^/^ pp pe2
+          let inner = pp pe1 ^^^ pp_binop bop ^/^ pp pe2 in
+          if !always_paren_binops then P.parens inner else inner
       | PEconv_int (ity, pe) ->
           pp_keyword "__conv_int__" ^^ P.parens (pp_ctype (Ctype ([], Basic (Integer ity))) ^^ P.comma ^^^ pp pe)
       | (PEwrapI _ | PEcatch_exceptional_condition _) as pe ->

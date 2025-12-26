@@ -564,7 +564,9 @@ let print_core (conf, io) ~filename core_file =
         ret in
       (* Use compact rendering if requested *)
       if conf.pp_core_compact then begin
+        Pp_core.always_paren_binops := true;
         run_pp_compact fout_opt (pp_file core_file);
+        Pp_core.always_paren_binops := false;
         return ()
       end else
         io.run_pp fout_opt (pp_file core_file)

@@ -1,5 +1,8 @@
 open Core
 
+(* When true, always wrap binary ops in parens (for compact mode comparison testing) *)
+val always_paren_binops : bool ref
+
 module type CONFIG =
 sig
   (* Show ISO STD marks *)
