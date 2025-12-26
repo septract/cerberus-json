@@ -329,7 +329,7 @@ let rec pp_value = function
   | Vtuple cvals ->
       P.parens (comma_list pp_value cvals)
   | Vctype ty ->
-      P.squotes (Cerb_colour.without_colour (Pp_ail.pp_ctype Ctype.no_qualifiers) ty)
+      P.squotes (Pp_core_ctype.pp_ctype ty)
   | Vobject oval ->
       pp_object_value oval
   | Vloaded lval ->
