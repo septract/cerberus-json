@@ -37,16 +37,18 @@ let pp_to_string doc = Pp_utils.to_plain_string doc
 
 (* Symbols and identifiers - matches pp_symbol.ml to_string_pretty *)
 let json_sym (sym : Symbol.sym) : Yojson.Safe.t =
+  (* Must match pp_symbol.ml to_string_pretty for consistency *)
   let Symbol.Symbol (_, n, sd) = sym in
   let name = match sd with
-    | Symbol.SD_Id name -> name
-    | Symbol.SD_CN_Id name -> name
-    | Symbol.SD_ObjectAddress name -> name
-    | Symbol.SD_Return -> "return"
-    | Symbol.SD_FunArg (_, i) -> Printf.sprintf "arg_%d" i
+    | Symbol.SD_Id name
+    | Symbol.SD_ObjectAddress name
     | Symbol.SD_FunArgValue name -> name
+    | Symbol.SD_CN_Id name -> name
     | Symbol.SD_unnamed_tag _ -> Printf.sprintf "__cerbty_unnamed_tag_%d" n
-    | Symbol.SD_None -> Printf.sprintf "a_%d" n  (* matches pp_symbol.ml *)
+    (* All other cases fall through to a_N, matching pp_symbol.ml *)
+    | Symbol.SD_None
+    | Symbol.SD_Return
+    | Symbol.SD_FunArg _ -> Printf.sprintf "a_%d" n
   in
   `Assoc [
     ("id", `Int n);
@@ -632,10 +634,10 @@ let rec json_expr (Expr (annots, e_)) =
           ("then_branch", json_expr e1);
           ("else_branch", json_expr e2)
         ]
-    | Eccall (_, pe_fn, pe_ty, pes) ->
+    | Eccall (_, pe_ty, pe_fn, pes) ->
         obj "Eccall" [
-          ("function", json_pexpr pe_fn);
           ("type", json_pexpr pe_ty);
+          ("function", json_pexpr pe_fn);
           ("args", `List (List.map json_pexpr pes))
         ]
     | Eproc (_, name, pes) ->
