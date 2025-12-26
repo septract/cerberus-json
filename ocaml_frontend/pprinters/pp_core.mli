@@ -3,6 +3,9 @@ open Core
 (* When true, always wrap binary ops in parens (for compact mode comparison testing) *)
 val always_paren_binops : bool ref
 
+(* When true, use fixed precision for floats (for compact mode comparison testing) *)
+val fixed_precision_floats : bool ref
+
 module type CONFIG =
 sig
   (* Show ISO STD marks *)

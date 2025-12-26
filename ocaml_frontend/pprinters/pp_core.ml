@@ -12,6 +12,9 @@ open Cerb_pp_prelude
 (* When true, always wrap binary ops in parens (for compact mode comparison testing) *)
 let always_paren_binops = ref false
 
+(* When true, use fixed precision for floats (for compact mode comparison testing) *)
+let fixed_precision_floats = ref false
+
 module type CONFIG =
 sig
   val show_std: bool
@@ -282,7 +285,11 @@ let rec pp_object_value = function
   | OVfloating fval ->
       Impl_mem.case_fval fval
         (fun () -> !^ "unspec(floating)")
-        (fun fval -> !^(string_of_float fval))
+        (fun fval ->
+          if !fixed_precision_floats then
+            !^(Printf.sprintf "%f" fval)  (* fixed 6 decimal places *)
+          else
+            !^(string_of_float fval))
 (*
   | OVsymbolic symb ->
       !^ "SYMB" ^^ P.parens (Pp_symbolic.pp_symbolic pp_object_value Pp_mem.pp_pointer_value symb)

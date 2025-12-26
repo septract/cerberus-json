@@ -160,7 +160,7 @@ let json_integer_type_struct (ity : Ctype.integerType) : Yojson.Safe.t =
       | Intmax_t -> `String "Intmax_t"
       | Intptr_t -> `String "Intptr_t"
     )]
-  | Enum sym -> obj "Enum" [("tag", json_sym sym)]
+  | Enum sym -> obj "Enum" [("enum_tag", json_sym sym)]
   | Size_t -> obj_only "Size_t"
   | Wchar_t -> obj_only "Wchar_t"
   | Wint_t -> obj_only "Wint_t"
@@ -794,24 +794,20 @@ let json_tag_definitions tagDefs =
       ])
   ) tagDefs
 
-(* Global definitions *)
+(* Global definitions - mirrors pp_globs which only outputs GlobalDef, not GlobalDecl *)
 let json_glob_decl (sym, decl) =
   match decl with
   | GlobalDef ((bty, cty), e) ->
-      `Assoc [
+      Some (`Assoc [
         ("symbol", json_sym sym);
         ("tag", `String "GlobalDef");
         ("core_type", json_core_base_type bty);
         ("ctype", json_ctype cty);
         ("init", json_expr e)
-      ]
-  | GlobalDecl (bty, cty) ->
-      `Assoc [
-        ("symbol", json_sym sym);
-        ("tag", `String "GlobalDecl");
-        ("core_type", json_core_base_type bty);
-        ("ctype", json_ctype cty)
-      ]
+      ])
+  | GlobalDecl _ ->
+      (* pp_globs skips GlobalDecl, so we do too *)
+      None
 
 (* Top-level file - mirrors pp_file in pp_core.ml *)
 let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
@@ -820,7 +816,7 @@ let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
     | None -> `Null
   in
   let tagdefs_json = `List (json_tag_definitions file.tagDefs) in
-  let globs_json = `List (List.map json_glob_decl file.globs) in
+  let globs_json = `List (List.filter_map json_glob_decl file.globs) in
   let funs_json = `List (json_fun_map file.funs) in
   `Assoc [
     ("main", main_json);

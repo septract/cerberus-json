@@ -565,8 +565,10 @@ let print_core (conf, io) ~filename core_file =
       (* Use compact rendering if requested *)
       if conf.pp_core_compact then begin
         Pp_core.always_paren_binops := true;
+        Pp_core.fixed_precision_floats := true;
         run_pp_compact fout_opt (pp_file core_file);
         Pp_core.always_paren_binops := false;
+        Pp_core.fixed_precision_floats := false;
         return ()
       end else
         io.run_pp fout_opt (pp_file core_file)
