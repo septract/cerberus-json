@@ -55,6 +55,23 @@ let json_sym (sym : Symbol.sym) : Yojson.Safe.t =
     ("name", `String name)
   ]
 
+(* Symbols for object types (struct/union in BTy_loaded, BTy_object)
+   Matches pp_symbol.ml to_string (NOT to_string_pretty)
+   pp_core.ml pp_core_object_type uses: !^(Pp_symbol.to_string ident) *)
+let json_object_type_sym (sym : Symbol.sym) : Yojson.Safe.t =
+  let Symbol.Symbol (_, n, sd) = sym in
+  let name = match sd with
+    | Symbol.SD_Id str
+    | Symbol.SD_ObjectAddress str
+    | Symbol.SD_FunArgValue str -> Printf.sprintf "%s_%d" str n
+    (* to_string uses a_N for all other cases including SD_unnamed_tag *)
+    | _ -> Printf.sprintf "a_%d" n
+  in
+  `Assoc [
+    ("id", `Int n);
+    ("name", `String name)
+  ]
+
 let json_identifier (Symbol.Identifier (_, name)) : Yojson.Safe.t =
   `String name
 
@@ -79,14 +96,14 @@ let json_prefix (pref : Symbol.prefix) : Yojson.Safe.t =
 let json_loc (loc : Cerb_location.t) : Yojson.Safe.t =
   `String (pp_to_string (Cerb_location.pp_location loc))
 
-(* Core object types *)
+(* Core object types - uses json_object_type_sym to match pp_core.ml pp_core_object_type *)
 let rec json_core_object_type = function
   | OTy_integer -> obj_only "OTy_integer"
   | OTy_floating -> obj_only "OTy_floating"
   | OTy_pointer -> obj_only "OTy_pointer"
   | OTy_array oty -> obj "OTy_array" [("element", json_core_object_type oty)]
-  | OTy_struct sym -> obj "OTy_struct" [("struct_tag", json_sym sym)]
-  | OTy_union sym -> obj "OTy_union" [("union_tag", json_sym sym)]
+  | OTy_struct sym -> obj "OTy_struct" [("struct_tag", json_object_type_sym sym)]
+  | OTy_union sym -> obj "OTy_union" [("union_tag", json_object_type_sym sym)]
 
 (* Core base types *)
 let rec json_core_base_type = function
