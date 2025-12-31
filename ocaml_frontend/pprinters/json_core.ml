@@ -768,6 +768,39 @@ let json_fun_map_decl decl =
           ("body", json_expr body)
         ])
 
+(* Function declaration without location filtering - for stdlib *)
+let json_fun_map_decl_all decl =
+  match decl with
+  | Fun (ret_ty, params, body) ->
+      obj "Fun" [
+        ("return_type", json_core_base_type ret_ty);
+        ("params", `List (List.map (fun (sym, bty) ->
+          `Assoc [("symbol", json_sym sym); ("type", json_core_base_type bty)]
+        ) params));
+        ("body", json_pexpr body)
+      ]
+  | ProcDecl (loc, ret_ty, param_tys) ->
+      obj "ProcDecl" [
+        ("loc", json_loc loc);
+        ("return_type", json_core_base_type ret_ty);
+        ("param_types", `List (List.map json_core_base_type param_tys))
+      ]
+  | BuiltinDecl (loc, ret_ty, param_tys) ->
+      obj "BuiltinDecl" [
+        ("loc", json_loc loc);
+        ("return_type", json_core_base_type ret_ty);
+        ("param_types", `List (List.map json_core_base_type param_tys))
+      ]
+  | Proc (loc, _mrk, ret_ty, params, body) ->
+      obj "Proc" [
+        ("loc", json_loc loc);
+        ("return_type", json_core_base_type ret_ty);
+        ("params", `List (List.map (fun (sym, bty) ->
+          `Assoc [("symbol", json_sym sym); ("type", json_core_base_type bty)]
+        ) params));
+        ("body", json_expr body)
+      ]
+
 (* Function map - mirrors pp_fun_map in pp_core.ml *)
 (* Note: Pmap.fold iterates in key order, and pp_core uses acc ^^ new (append),
    so we prepend to accumulator and reverse at the end to get the same order *)
@@ -780,6 +813,15 @@ let json_fun_map funs =
           ("declaration", json_decl)
         ] :: acc
     | None -> acc
+  ) funs []
+
+(* Function map without filtering - for stdlib *)
+let json_fun_map_all funs =
+  List.rev @@ Pmap.fold (fun sym decl acc ->
+    `Assoc [
+      ("symbol", json_sym sym);
+      ("declaration", json_fun_map_decl_all decl)
+    ] :: acc
   ) funs []
 
 (* Tag definitions - mirrors pp_tagDefinitions *)
@@ -816,11 +858,13 @@ let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
     | None -> `Null
   in
   let tagdefs_json = `List (json_tag_definitions file.tagDefs) in
+  let stdlib_json = `List (json_fun_map_all file.stdlib) in
   let globs_json = `List (List.filter_map json_glob_decl file.globs) in
   let funs_json = `List (json_fun_map file.funs) in
   `Assoc [
     ("main", main_json);
     ("tagDefs", tagdefs_json);
+    ("stdlib", stdlib_json);
     ("globs", globs_json);
     ("funs", funs_json)
   ]
