@@ -851,6 +851,25 @@ let json_glob_decl (sym, decl) =
       (* pp_globs skips GlobalDecl, so we do too *)
       None
 
+(* Function info entry - for cfunction() expression *)
+let json_funinfo_entry (sym, (loc, _attrs, ret_ty, params, is_variadic, has_proto)) =
+  `Assoc [
+    ("symbol", json_sym sym);
+    ("loc", json_loc loc);
+    ("return_type", json_ctype ret_ty);
+    ("params", `List (List.map (fun (sym_opt, ty) ->
+      `Assoc [
+        ("symbol", match sym_opt with Some s -> json_sym s | None -> `Null);
+        ("type", json_ctype ty)
+      ]) params));
+    ("is_variadic", `Bool is_variadic);
+    ("has_proto", `Bool has_proto)
+  ]
+
+(* Function info map - needed for cfunction() evaluation *)
+let json_funinfo funinfo =
+  `List (List.map json_funinfo_entry (Pmap.bindings_list funinfo))
+
 (* Top-level file - mirrors pp_file in pp_core.ml *)
 let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
   let main_json = match file.main with
@@ -861,12 +880,14 @@ let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
   let stdlib_json = `List (json_fun_map_all file.stdlib) in
   let globs_json = `List (List.filter_map json_glob_decl file.globs) in
   let funs_json = `List (json_fun_map file.funs) in
+  let funinfo_json = json_funinfo file.funinfo in
   `Assoc [
     ("main", main_json);
     ("tagDefs", tagdefs_json);
     ("stdlib", stdlib_json);
     ("globs", globs_json);
-    ("funs", funs_json)
+    ("funs", funs_json);
+    ("funinfo", funinfo_json)
   ]
 
 end (* Make *)
