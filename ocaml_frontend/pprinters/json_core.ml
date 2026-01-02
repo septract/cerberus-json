@@ -316,6 +316,65 @@ let json_pointer_value (pval : Impl_mem.pointer_value) : Yojson.Safe.t =
       ("addr", `String (Nat_big_num.to_string addr))
     ])
 
+(* Floating type serialization *)
+let json_floating_type (fty : Ctype.floatingType) : Yojson.Safe.t =
+  match fty with
+  | RealFloating Float -> `String "Float"
+  | RealFloating Double -> `String "Double"
+  | RealFloating LongDouble -> `String "LongDouble"
+
+(* Memory value serialization - uses case_mem_value to pattern match on abstract type *)
+let rec json_mem_value (mval : Impl_mem.mem_value) : Yojson.Safe.t =
+  Impl_mem.case_mem_value mval
+    (* unspecified *)
+    (fun cty -> obj "MVunspecified" [("ctype", json_ctype cty)])
+    (* concurrent read - shouldn't occur in sequential *)
+    (fun ity sym -> obj "MVconcurrent" [
+      ("int_type", json_integer_type_struct ity);
+      ("symbol", json_sym sym)
+    ])
+    (* integer *)
+    (fun ity ival -> obj "MVinteger" [
+      ("int_type", json_integer_type_struct ity);
+      ("value", `String (pp_to_string (Impl_mem.pp_integer_value_for_core ival)))
+    ])
+    (* floating *)
+    (fun fty fval -> obj "MVfloating" [
+      ("float_type", json_floating_type fty);
+      ("value", Impl_mem.case_fval fval
+        (fun () -> `String "unspecified")
+        (fun f ->
+          if f <> f then `String "NaN"
+          else if f = infinity then `String "Infinity"
+          else if f = neg_infinity then `String "-Infinity"
+          else `Float f))
+    ])
+    (* pointer *)
+    (fun cty pval -> obj "MVpointer" [
+      ("ctype", json_ctype cty);
+      ("value", json_pointer_value pval)
+    ])
+    (* array *)
+    (fun mvals -> obj "MVarray" [
+      ("elements", `List (List.map json_mem_value mvals))
+    ])
+    (* struct *)
+    (fun tag_sym members -> obj "MVstruct" [
+      ("struct_tag", json_sym tag_sym);
+      ("members", `List (List.map (fun (id, cty, mval) ->
+        `Assoc [
+          ("name", json_identifier id);
+          ("ctype", json_ctype cty);
+          ("value", json_mem_value mval)
+        ]) members))
+    ])
+    (* union *)
+    (fun tag_sym member_id mval -> obj "MVunion" [
+      ("union_tag", json_sym tag_sym);
+      ("member", json_identifier member_id);
+      ("value", json_mem_value mval)
+    ])
+
 (* Values *)
 let rec json_object_value = function
   | OVinteger ival ->
@@ -341,14 +400,14 @@ let rec json_object_value = function
           `Assoc [
             ("name", json_identifier id);
             ("ctype", json_ctype cty);
-            ("value", `String (pp_to_string (Impl_mem.pp_mem_value mval)))
+            ("value", json_mem_value mval)
           ]) members))
       ]
   | OVunion (tag, id, mval) ->
       obj "OVunion" [
         ("union_tag", json_sym tag);
         ("member", json_identifier id);
-        ("value", `String (pp_to_string (Impl_mem.pp_mem_value mval)))
+        ("value", json_mem_value mval)
       ]
 
 and json_loaded_value = function
@@ -636,9 +695,40 @@ let json_paction (Paction (pol, act)) =
     ("action", json_action act)
   ]
 
-(* Memop *)
-let json_memop (op : 'sym Mem_common.generic_memop) : Yojson.Safe.t =
-  `String (pp_to_string (Pp_mem.pp_memop op))
+(* Memop - structured JSON export *)
+let json_memop (op : Symbol.sym Mem_common.generic_memop) : Yojson.Safe.t =
+  match op with
+  | Mem_common.PtrEq -> obj_only "PtrEq"
+  | Mem_common.PtrNe -> obj_only "PtrNe"
+  | Mem_common.PtrLt -> obj_only "PtrLt"
+  | Mem_common.PtrGt -> obj_only "PtrGt"
+  | Mem_common.PtrLe -> obj_only "PtrLe"
+  | Mem_common.PtrGe -> obj_only "PtrGe"
+  | Mem_common.Ptrdiff -> obj_only "Ptrdiff"
+  | Mem_common.IntFromPtr -> obj_only "IntFromPtr"
+  | Mem_common.PtrFromInt -> obj_only "PtrFromInt"
+  | Mem_common.PtrValidForDeref -> obj_only "PtrValidForDeref"
+  | Mem_common.PtrWellAligned -> obj_only "PtrWellAligned"
+  | Mem_common.PtrArrayShift -> obj_only "PtrArrayShift"
+  | Mem_common.PtrMemberShift (tag_sym, member_id) ->
+      obj "PtrMemberShift" [
+        ("struct_tag", json_sym tag_sym);
+        ("member", json_identifier member_id)
+      ]
+  | Mem_common.Memcpy -> obj_only "Memcpy"
+  | Mem_common.Memcmp -> obj_only "Memcmp"
+  | Mem_common.Realloc -> obj_only "Realloc"
+  | Mem_common.Va_start -> obj_only "Va_start"
+  | Mem_common.Va_copy -> obj_only "Va_copy"
+  | Mem_common.Va_arg -> obj_only "Va_arg"
+  | Mem_common.Va_end -> obj_only "Va_end"
+  | Mem_common.Copy_alloc_id -> obj_only "Copy_alloc_id"
+  | Mem_common.CHERI_intrinsic (name, (ret_ty, arg_tys)) ->
+      obj "CHERI_intrinsic" [
+        ("name", `String name);
+        ("return_type", json_ctype ret_ty);
+        ("arg_types", `List (List.map json_ctype arg_tys))
+      ]
 
 (* Effectful expressions *)
 let rec json_expr (Expr (annots, e_)) =
@@ -894,6 +984,46 @@ let json_funinfo_entry (sym, (loc, _attrs, ret_ty, params, is_variadic, has_prot
 let json_funinfo funinfo =
   `List (List.map json_funinfo_entry (Pmap.bindings_list funinfo))
 
+(* Implementation-defined constant declarations *)
+let json_impl_decl = function
+  | Def (bty, pe) ->
+      obj "Def" [
+        ("type", json_core_base_type bty);
+        ("expr", json_pexpr pe)
+      ]
+  | IFun (bty, params, pe) ->
+      obj "IFun" [
+        ("return_type", json_core_base_type bty);
+        ("params", `List (List.map (fun (sym, bty) ->
+          `Assoc [("symbol", json_sym sym); ("type", json_core_base_type bty)]
+        ) params));
+        ("body", json_pexpr pe)
+      ]
+
+let json_impl impl =
+  `List (List.map (fun (ic, decl) ->
+    `Assoc [
+      ("constant", `String (Implementation.string_of_implementation_constant ic));
+      ("decl", json_impl_decl decl)
+    ]
+  ) (Pmap.bindings_list impl))
+
+(* Linking kind for extern symbols *)
+let json_linking_kind = function
+  | LK_none -> obj_only "LK_none"
+  | LK_tentative sym -> obj "LK_tentative" [("symbol", json_sym sym)]
+  | LK_normal sym -> obj "LK_normal" [("symbol", json_sym sym)]
+
+(* External symbol mapping *)
+let json_extern extern =
+  `List (List.map (fun (id, (syms, lk)) ->
+    `Assoc [
+      ("identifier", json_identifier id);
+      ("symbols", `List (List.map json_sym syms));
+      ("linking_kind", json_linking_kind lk)
+    ]
+  ) (Pmap.bindings_list extern))
+
 (* Top-level file - mirrors pp_file in pp_core.ml *)
 let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
   let main_json = match file.main with
@@ -902,15 +1032,19 @@ let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
   in
   let tagdefs_json = `List (json_tag_definitions file.tagDefs) in
   let stdlib_json = `List (json_fun_map_all file.stdlib) in
+  let impl_json = json_impl file.impl in
   let globs_json = `List (List.filter_map json_glob_decl file.globs) in
   let funs_json = `List (json_fun_map file.funs) in
+  let extern_json = json_extern file.extern in
   let funinfo_json = json_funinfo file.funinfo in
   `Assoc [
     ("main", main_json);
     ("tagDefs", tagdefs_json);
     ("stdlib", stdlib_json);
+    ("impl", impl_json);
     ("globs", globs_json);
     ("funs", funs_json);
+    ("extern", extern_json);
     ("funinfo", funinfo_json)
   ]
 
