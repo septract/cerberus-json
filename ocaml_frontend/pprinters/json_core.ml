@@ -292,6 +292,30 @@ let json_iop = function
   | IOpDiv -> `String "IOpDiv"
   | IOpRem_t -> `String "IOpRem_t"
 
+(* Pointer values - structured serialization using case_ptrval interface *)
+let json_pointer_value (pval : Impl_mem.pointer_value) : Yojson.Safe.t =
+  Impl_mem.case_ptrval pval
+    (* null pointer *)
+    (fun cty -> `Assoc [
+      ("tag", `String "PVnull");
+      ("ctype", json_ctype cty)
+    ])
+    (* function pointer *)
+    (fun sym_opt -> `Assoc [
+      ("tag", `String "PVfunction");
+      ("sym", match sym_opt with
+        | Some sym -> json_sym sym
+        | None -> `Null)
+    ])
+    (* concrete pointer *)
+    (fun alloc_id_opt addr -> `Assoc [
+      ("tag", `String "PVconcrete");
+      ("alloc_id", match alloc_id_opt with
+        | Some id -> `String (Nat_big_num.to_string id)
+        | None -> `Null);
+      ("addr", `String (Nat_big_num.to_string addr))
+    ])
+
 (* Values *)
 let rec json_object_value = function
   | OVinteger ival ->
@@ -307,7 +331,7 @@ let rec json_object_value = function
             else if f = neg_infinity then `String "-Infinity"
             else `Float f))]
   | OVpointer pval ->
-      obj "OVpointer" [("value", `String (pp_to_string (Impl_mem.pp_pointer_value pval)))]
+      obj "OVpointer" [("value", json_pointer_value pval)]
   | OVarray lvals ->
       obj "OVarray" [("elements", `List (List.map json_loaded_value lvals))]
   | OVstruct (tag, members) ->
