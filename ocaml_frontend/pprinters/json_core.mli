@@ -12,6 +12,17 @@ end
 (** Output module type *)
 module type JSON_CORE =
 sig
+  (** Serialize a generic Core file to JSON.
+      This function handles all top-level elements:
+      - main function symbol
+      - tag definitions (struct/union)
+      - stdlib functions (if enabled)
+      - implementation constants
+      - global variables
+      - functions (respecting show_include config)
+      - external symbol map
+      - function info map
+   *)
   val json_file: ('a, 'b) generic_file -> Yojson.Safe.t
 end
 

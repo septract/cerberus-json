@@ -25,6 +25,39 @@ open Config
 let obj tag fields = `Assoc (("tag", `String tag) :: fields)
 let obj_only tag = `Assoc [("tag", `String tag)]
 
+(* Location handling *)
+let json_pos pos =
+  `Assoc [
+    ("file", `String (Cerb_position.file pos));
+    ("line", `Int (Cerb_position.line pos));
+    ("column", `Int (Cerb_position.column pos))
+  ]
+
+let json_cursor = function
+  | Cerb_location.NoCursor -> `Null
+  | Cerb_location.PointCursor pos -> obj "PointCursor" [("pos", json_pos pos)]
+  | Cerb_location.RegionCursor (p1, p2) -> obj "RegionCursor" [("begin", json_pos p1); ("end", json_pos p2)]
+
+let json_loc (loc : Cerb_location.t) : Yojson.Safe.t =
+  match loc with
+  | Cerb_location.Loc_unknown -> `Null
+  | Cerb_location.Loc_other str -> obj "Other" [("desc", `String str)]
+  | Cerb_location.Loc_point pos ->
+      obj "Point" [("pos", json_pos pos)]
+  | Cerb_location.Loc_region (p1, p2, cursor) ->
+      obj "Region" [
+        ("begin", json_pos p1);
+        ("end", json_pos p2);
+        ("cursor", json_cursor cursor)
+      ]
+  | Cerb_location.Loc_regions (regions, cursor) ->
+      obj "Regions" [
+        ("regions", `List (List.map (fun (p1, p2) ->
+          `Assoc [("begin", json_pos p1); ("end", json_pos p2)]
+        ) regions));
+        ("cursor", json_cursor cursor)
+      ]
+
 (* Conditional output - mirrors pp_cond in pp_core.ml *)
 let json_cond loc (json_fn : unit -> Yojson.Safe.t) : Yojson.Safe.t option =
   if show_include || Cerb_location.from_main_file loc then
@@ -91,10 +124,6 @@ let json_prefix (pref : Symbol.prefix) : Yojson.Safe.t =
       obj_only "PrefTemporaryLifetime"
   | Symbol.PrefOther str ->
       obj "PrefOther" [("name", `String str)]
-
-(* Location *)
-let json_loc (loc : Cerb_location.t) : Yojson.Safe.t =
-  `String (pp_to_string (Cerb_location.pp_location loc))
 
 (* Core object types - uses json_object_type_sym to match pp_core.ml pp_core_object_type *)
 let rec json_core_object_type = function
@@ -449,9 +478,57 @@ let rec json_pattern (Pattern (annots, pat_)) =
         ("patterns", `List (List.map json_pattern pats))
       ]
 
+let json_unary_operator op =
+    match op with
+    | AilSyntax.Plus -> "Plus"
+    | AilSyntax.Minus -> "Minus"
+    | AilSyntax.Bnot -> "Bnot"
+    | AilSyntax.Address -> "Address"
+    | AilSyntax.Indirection -> "Indirection"
+    | AilSyntax.PostfixIncr -> "PostfixIncr"
+    | AilSyntax.PostfixDecr -> "PostfixDecr"
+
+let json_arithmetic_operator op =
+    match op with
+    | AilSyntax.Mul -> "Mul"
+    | AilSyntax.Div -> "Div"
+    | AilSyntax.Mod -> "Mod"
+    | AilSyntax.Add -> "Add"
+    | AilSyntax.Sub -> "Sub"
+    | AilSyntax.Shl -> "Shl"
+    | AilSyntax.Shr -> "Shr"
+    | AilSyntax.Band -> "Band"
+    | AilSyntax.Bxor -> "Bxor"
+    | AilSyntax.Bor -> "Bor"
+
+let json_binary_operator op =
+    match op with
+    | AilSyntax.Arithmetic aop -> obj "Arithmetic" [("op", `String (json_arithmetic_operator aop))]
+    | AilSyntax.Comma -> obj_only "Comma"
+    | AilSyntax.And -> obj_only "And"
+    | AilSyntax.Or -> obj_only "Or"
+    | AilSyntax.Lt -> obj_only "Lt"
+    | AilSyntax.Gt -> obj_only "Gt"
+    | AilSyntax.Le -> obj_only "Le"
+    | AilSyntax.Ge -> obj_only "Ge"
+    | AilSyntax.Eq -> obj_only "Eq"
+    | AilSyntax.Ne -> obj_only "Ne"
+
 (* Pure memop *)
 let json_pure_memop (op : Mem_common.pure_memop) : Yojson.Safe.t =
-  `String (pp_to_string (Pp_mem.pp_pure_memop op))
+  match op with
+  | Mem_common.DeriveCap (op, is_signed) ->
+      obj "DeriveCap" [
+        ("op", match op with
+            | Mem_common.DCunary uop -> obj "DCunary" [("op", `String (json_unary_operator uop))]
+            | Mem_common.DCbinary bop -> obj "DCbinary" [("op", json_binary_operator bop)]
+        );
+        ("is_signed", `Bool is_signed)
+      ]
+  | Mem_common.CapAssignValue -> obj_only "CapAssignValue"
+  | Mem_common.Ptr_tIntValue -> obj_only "Ptr_tIntValue"
+  | Mem_common.ByteFromInt -> obj_only "ByteFromInt"
+  | Mem_common.IntFromByte -> obj_only "IntFromByte"
 
 (* Pure expressions *)
 let rec json_pexpr (Pexpr (annots, _, pe_)) =
