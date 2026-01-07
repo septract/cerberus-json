@@ -58,12 +58,10 @@ let json_loc (loc : Cerb_location.t) : Yojson.Safe.t =
         ("cursor", json_cursor cursor)
       ]
 
-(* Conditional output - mirrors pp_cond in pp_core.ml *)
-let json_cond loc (json_fn : unit -> Yojson.Safe.t) : Yojson.Safe.t option =
-  if show_include || Cerb_location.from_main_file loc then
-    Some (json_fn ())
-  else
-    None
+(* Note: We export everything unconditionally (no filtering).
+   Filtering for pretty-printing is done on the Lean side using
+   Cerb_location.from_main_file logic (check if file ends in .c or .core).
+   This keeps our Cerberus changes minimal. *)
 
 (* Helper to convert PPrint document to string *)
 let pp_to_string doc = Pp_utils.to_plain_string doc
@@ -919,48 +917,8 @@ let json_tag_definition (td : Ctype.tag_definition) : Yojson.Safe.t =
         ) fields))
       ]
 
-(* Function declarations - mirrors pp_fun_map in pp_core.ml *)
+(* Function declarations - export all, no filtering *)
 let json_fun_map_decl decl =
-  match decl with
-  | Fun (ret_ty, params, body) ->
-      (* Fun always outputs - no location check, same as pp_core.ml *)
-      Some (obj "Fun" [
-        ("return_type", json_core_base_type ret_ty);
-        ("params", `List (List.map (fun (sym, bty) ->
-          `Assoc [("symbol", json_sym sym); ("type", json_core_base_type bty)]
-        ) params));
-        ("body", json_pexpr body)
-      ])
-  | ProcDecl (loc, ret_ty, param_tys) ->
-      (* ProcDecl uses pp_cond loc in pp_core.ml *)
-      json_cond loc (fun () ->
-        obj "ProcDecl" [
-          ("loc", json_loc loc);
-          ("return_type", json_core_base_type ret_ty);
-          ("param_types", `List (List.map json_core_base_type param_tys))
-        ])
-  | BuiltinDecl (loc, ret_ty, param_tys) ->
-      (* BuiltinDecl uses pp_cond loc in pp_core.ml *)
-      json_cond loc (fun () ->
-        obj "BuiltinDecl" [
-          ("loc", json_loc loc);
-          ("return_type", json_core_base_type ret_ty);
-          ("param_types", `List (List.map json_core_base_type param_tys))
-        ])
-  | Proc (loc, _mrk, ret_ty, params, body) ->
-      (* Proc uses pp_cond loc in pp_core.ml *)
-      json_cond loc (fun () ->
-        obj "Proc" [
-          ("loc", json_loc loc);
-          ("return_type", json_core_base_type ret_ty);
-          ("params", `List (List.map (fun (sym, bty) ->
-            `Assoc [("symbol", json_sym sym); ("type", json_core_base_type bty)]
-          ) params));
-          ("body", json_expr body)
-        ])
-
-(* Function declaration without location filtering - for stdlib *)
-let json_fun_map_decl_all decl =
   match decl with
   | Fun (ret_ty, params, body) ->
       obj "Fun" [
@@ -992,39 +950,24 @@ let json_fun_map_decl_all decl =
         ("body", json_expr body)
       ]
 
-(* Function map - mirrors pp_fun_map in pp_core.ml *)
-(* Note: Pmap.fold iterates in key order, and pp_core uses acc ^^ new (append),
-   so we prepend to accumulator and reverse at the end to get the same order *)
+(* Function map - export all functions, no filtering *)
 let json_fun_map funs =
-  List.rev @@ Pmap.fold (fun sym decl acc ->
-    match json_fun_map_decl decl with
-    | Some json_decl ->
-        `Assoc [
-          ("symbol", json_sym sym);
-          ("declaration", json_decl)
-        ] :: acc
-    | None -> acc
-  ) funs []
-
-(* Function map without filtering - for stdlib *)
-let json_fun_map_all funs =
   List.rev @@ Pmap.fold (fun sym decl acc ->
     `Assoc [
       ("symbol", json_sym sym);
-      ("declaration", json_fun_map_decl_all decl)
+      ("declaration", json_fun_map_decl decl)
     ] :: acc
   ) funs []
 
-(* Tag definitions - mirrors pp_tagDefinitions *)
+(* Tag definitions - export all, no filtering *)
 let json_tag_definitions tagDefs =
   let tagDefs = Pmap.bindings_list tagDefs in
-  List.filter_map (fun (sym, (loc, tagDef)) ->
-    json_cond loc (fun () ->
-      `Assoc [
-        ("symbol", json_sym sym);
-        ("loc", json_loc loc);
-        ("definition", json_tag_definition tagDef)
-      ])
+  List.map (fun (sym, (loc, tagDef)) ->
+    `Assoc [
+      ("symbol", json_sym sym);
+      ("loc", json_loc loc);
+      ("definition", json_tag_definition tagDef)
+    ]
   ) tagDefs
 
 (* Global definitions - mirrors pp_globs which only outputs GlobalDef, not GlobalDecl *)
@@ -1108,7 +1051,7 @@ let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
     | None -> `Null
   in
   let tagdefs_json = `List (json_tag_definitions file.tagDefs) in
-  let stdlib_json = `List (json_fun_map_all file.stdlib) in
+  let stdlib_json = `List (json_fun_map file.stdlib) in
   let impl_json = json_impl file.impl in
   let globs_json = `List (List.filter_map json_glob_decl file.globs) in
   let funs_json = `List (json_fun_map file.funs) in

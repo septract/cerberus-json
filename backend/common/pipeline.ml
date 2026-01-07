@@ -573,17 +573,12 @@ let print_core (conf, io) ~filename core_file =
       end else
         io.run_pp fout_opt (pp_file core_file)
   end >>= fun () ->
-  (* JSON Core output - mirrors the pp_core block above *)
-  (* Annot flag controls whether to include stdlib/header definitions *)
+  (* JSON Core output - always use All to include everything
+   * We need complete programs for interpretation, so we always include
+   * stdlib and header definitions regardless of the Annot flag *)
   whenM (Option.is_some conf.json_core_out) begin
       fun () ->
-      let json_file =
-        if List.mem Annot conf.ppflags then
-          Json_core.All.json_file
-        else
-          Json_core.Basic.json_file
-      in
-      let json = json_file core_file in
+      let json = Json_core.All.json_file core_file in
       let json_str = Yojson.Safe.pretty_to_string json in
       let path = Option.get conf.json_core_out in
       let oc = open_out path in
