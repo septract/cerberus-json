@@ -268,6 +268,17 @@ let cerberus debug_level progress core_obj
           | f::fs ->
             Core_linking.link (f::fs)
         end >>= fun core_file ->
+        (* JSON Core output - done after linking so libc is included *)
+        begin match json_core_out with
+        | Some path ->
+            let json = Json_core.All.json_file core_file in
+            let json_str = Yojson.Safe.pretty_to_string json in
+            let oc = open_out path in
+            output_string oc json_str;
+            close_out oc;
+            return ()
+        | None -> return ()
+        end >>= fun () ->
         if exec then
           let open Driver_ocaml in
           let () = Tags.reset_tagDefs () in (* TODO: check this *)

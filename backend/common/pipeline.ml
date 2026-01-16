@@ -573,19 +573,8 @@ let print_core (conf, io) ~filename core_file =
       end else
         io.run_pp fout_opt (pp_file core_file)
   end >>= fun () ->
-  (* JSON Core output - always use All to include everything
-   * We need complete programs for interpretation, so we always include
-   * stdlib and header definitions regardless of the Annot flag *)
-  whenM (Option.is_some conf.json_core_out) begin
-      fun () ->
-      let json = Json_core.All.json_file core_file in
-      let json_str = Yojson.Safe.pretty_to_string json in
-      let path = Option.get conf.json_core_out in
-      let oc = open_out path in
-      output_string oc json_str;
-      close_out oc;
-      return ()
-  end >>= fun () ->
+  (* JSON Core output moved to main.ml after linking, so that libc
+   * implementations are included in the output *)
   return core_file
 
 let core_passes (conf, io) ~filename core_file =
