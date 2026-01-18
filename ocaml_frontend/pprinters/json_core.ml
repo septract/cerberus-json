@@ -985,11 +985,25 @@ let json_glob_decl (sym, decl) =
       (* pp_globs skips GlobalDecl, so we do too *)
       None
 
+(* Extract cerb::magic attribute strings from attributes (for CN annotations) *)
+let json_cerb_magic_attrs (Annot.Attrs attrs) : Yojson.Safe.t =
+  let magic_args = List.concat_map (fun attr ->
+    match (attr.Annot.attr_ns, attr.Annot.attr_id) with
+    | (Some (Symbol.Identifier (_, "cerb")), Symbol.Identifier (_, "magic")) ->
+        List.map (fun (loc, arg, _) ->
+          `Assoc [("loc", json_loc loc); ("text", `String arg)]
+        ) attr.Annot.attr_args
+    | _ -> []
+  ) attrs
+  in
+  `List magic_args
+
 (* Function info entry - for cfunction() expression *)
-let json_funinfo_entry (sym, (loc, _attrs, ret_ty, params, is_variadic, has_proto)) =
+let json_funinfo_entry (sym, (loc, attrs, ret_ty, params, is_variadic, has_proto)) =
   `Assoc [
     ("symbol", json_sym sym);
     ("loc", json_loc loc);
+    ("cn_magic", json_cerb_magic_attrs attrs);
     ("return_type", json_ctype ret_ty);
     ("params", `List (List.map (fun (sym_opt, ty) ->
       `Assoc [
