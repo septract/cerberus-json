@@ -268,10 +268,12 @@ let cerberus debug_level progress core_obj
           | f::fs ->
             Core_linking.link (f::fs)
         end >>= fun core_file ->
-        (* JSON Core output - done after linking so libc is included *)
+        (* JSON Core output - done after linking so libc is included.
+           We typecheck to get type annotations on expressions. *)
         begin match json_core_out with
         | Some path ->
-            let json = Json_core.All.json_file core_file in
+            Core_typing.typecheck_program core_file >>= fun typed_core_file ->
+            let json = Json_core.All.json_file typed_core_file in
             let json_str = Yojson.Safe.pretty_to_string json in
             let oc = open_out path in
             output_string oc json_str;

@@ -22,8 +22,15 @@ sig
       - functions (respecting show_include config)
       - external symbol map
       - function info map
+
+      Note: Requires core_base_type for the first parameter because we serialize
+      type annotations on pure expressions.
+
+      The second type parameter must be unit because this serializes the static
+      (pre-execution) Core AST. The unit type is used for footprint annotations
+      which are only populated during execution.
    *)
-  val json_file: ('a, 'b) generic_file -> Yojson.Safe.t
+  val json_file: (core_base_type, unit) generic_file -> Yojson.Safe.t
 end
 
 module Make (C : CONFIG) : JSON_CORE

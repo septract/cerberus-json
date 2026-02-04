@@ -13,7 +13,10 @@ end
 (* Output module type *)
 module type JSON_CORE =
 sig
-  val json_file: ('a, 'b) generic_file -> Yojson.Safe.t
+  (* The second type parameter must be unit because this serializes the static
+     (pre-execution) Core AST. The unit type is used for footprint annotations
+     which are only populated during execution. *)
+  val json_file: (core_base_type, unit) generic_file -> Yojson.Safe.t
 end
 
 (* Main functor - mirrors pp_core.ml Make *)
@@ -156,43 +159,114 @@ let json_qualifiers (q : Ctype.qualifiers) : Yojson.Safe.t =
     ("volatile", `Bool q.volatile)
   ]
 
-(* Integer types - structured representation *)
-let json_integer_type_struct (ity : Ctype.integerType) : Yojson.Safe.t =
+(* Identifier with location - preserves location info *)
+let json_identifier_with_loc (Symbol.Identifier (loc, name)) : Yojson.Safe.t =
+  `Assoc [
+    ("loc", json_loc loc);
+    ("name", `String name)
+  ]
+
+(* C attributes - for C2X [[...]] attributes *)
+let json_attribute (attr : Annot.attribute) : Yojson.Safe.t =
+  `Assoc [
+    ("ns", match attr.Annot.attr_ns with
+      | Some id -> json_identifier_with_loc id
+      | None -> `Null);
+    ("id", json_identifier_with_loc attr.Annot.attr_id);
+    ("args", `List (List.map (fun (loc, arg, extra_args) ->
+      `Assoc [
+        ("loc", json_loc loc);
+        ("text", `String arg);
+        ("extra_args", `List (List.map (fun (eloc, etext) ->
+          `Assoc [("loc", json_loc eloc); ("text", `String etext)]
+        ) extra_args))
+      ]
+    ) attr.Annot.attr_args))
+  ]
+
+let json_attributes (Annot.Attrs attrs) : Yojson.Safe.t =
+  `List (List.map json_attribute attrs)
+
+(* Label annotations - where a label comes from *)
+let json_label_annot (lbl : Annot.label_annot) : Yojson.Safe.t =
+  match lbl with
+  | Annot.LAloop id -> obj "LAloop" [("id", `Int id)]
+  | Annot.LAloop_continue id -> obj "LAloop_continue" [("id", `Int id)]
+  | Annot.LAloop_break id -> obj "LAloop_break" [("id", `Int id)]
+  | Annot.LAreturn -> obj_only "LAreturn"
+  | Annot.LAswitch -> obj_only "LAswitch"
+  | Annot.LAcase -> obj_only "LAcase"
+  | Annot.LAdefault -> obj_only "LAdefault"
+  | Annot.LAactual_label -> obj_only "LAactual_label"
+
+(* Cerberus-specific attributes *)
+let json_cerb_attribute (cerb : Annot.cerb_attribute) : Yojson.Safe.t =
+  match cerb with
+  | Annot.ACerb_with_address addr -> obj "ACerb_with_address" [("address", `String (Nat_big_num.to_string addr))]
+  | Annot.ACerb_hidden -> obj_only "ACerb_hidden"
+
+(* Integer types - needed by value annotations below *)
+let json_integer_base_type (ibty : Ctype.integerBaseType) : Yojson.Safe.t =
+  match ibty with
+  | Ichar -> `String "Ichar"
+  | Short -> `String "Short"
+  | Int_ -> `String "Int_"
+  | Long -> `String "Long"
+  | LongLong -> `String "LongLong"
+  | IntN_t n -> obj "IntN_t" [("bits", `Int n)]
+  | Int_leastN_t n -> obj "Int_leastN_t" [("bits", `Int n)]
+  | Int_fastN_t n -> obj "Int_fastN_t" [("bits", `Int n)]
+  | Intmax_t -> `String "Intmax_t"
+  | Intptr_t -> `String "Intptr_t"
+
+let json_integer_type_annot (ity : Ctype.integerType) : Yojson.Safe.t =
   match ity with
   | Char -> obj_only "Char"
   | Bool -> obj_only "Bool"
-  | Signed sik -> obj "Signed" [("kind",
-      match sik with
-      | Ichar -> `String "Ichar"
-      | Short -> `String "Short"
-      | Int_ -> `String "Int_"
-      | Long -> `String "Long"
-      | LongLong -> `String "LongLong"
-      | IntN_t n -> obj "IntN_t" [("bits", `Int n)]
-      | Int_leastN_t n -> obj "Int_leastN_t" [("bits", `Int n)]
-      | Int_fastN_t n -> obj "Int_fastN_t" [("bits", `Int n)]
-      | Intmax_t -> `String "Intmax_t"
-      | Intptr_t -> `String "Intptr_t"
-    )]
-  | Unsigned ibty -> obj "Unsigned" [("kind",
-      match ibty with
-      | Ichar -> `String "Ichar"
-      | Short -> `String "Short"
-      | Int_ -> `String "Int_"
-      | Long -> `String "Long"
-      | LongLong -> `String "LongLong"
-      | IntN_t n -> obj "IntN_t" [("bits", `Int n)]
-      | Int_leastN_t n -> obj "Int_leastN_t" [("bits", `Int n)]
-      | Int_fastN_t n -> obj "Int_fastN_t" [("bits", `Int n)]
-      | Intmax_t -> `String "Intmax_t"
-      | Intptr_t -> `String "Intptr_t"
-    )]
+  | Signed ibty -> obj "Signed" [("kind", json_integer_base_type ibty)]
+  | Unsigned ibty -> obj "Unsigned" [("kind", json_integer_base_type ibty)]
   | Enum sym -> obj "Enum" [("enum_tag", json_sym sym)]
   | Size_t -> obj_only "Size_t"
   | Wchar_t -> obj_only "Wchar_t"
   | Wint_t -> obj_only "Wint_t"
   | Ptrdiff_t -> obj_only "Ptrdiff_t"
   | Ptraddr_t -> obj_only "Ptraddr_t"
+
+(* Value annotations - note: IntegerType.integerType is included via Ctype *)
+let json_value_annot (v : Annot.value_annot) : Yojson.Safe.t =
+  match v with
+  | Annot.Ainteger ity -> obj "Ainteger" [("integer_type", json_integer_type_annot ity)]
+
+(* Core annotations - full serialization *)
+let json_annot (annot : Annot.annot) : Yojson.Safe.t =
+  match annot with
+  | Annot.Astd s -> obj "Astd" [("text", `String s)]
+  | Annot.Aloc loc -> obj "Aloc" [("loc", json_loc loc)]
+  | Annot.Auid uid -> obj "Auid" [("uid", `String uid)]
+  | Annot.Amarker n -> obj "Amarker" [("n", `Int n)]
+  | Annot.Amarker_object_types n -> obj "Amarker_object_types" [("n", `Int n)]
+  | Annot.Abmc (Annot.Abmc_id n) -> obj "Abmc" [("id", `Int n)]
+  | Annot.Aattrs attrs -> obj "Aattrs" [("attrs", json_attributes attrs)]
+  | Annot.Atypedef sym -> obj "Atypedef" [("symbol", json_sym sym)]
+  | Annot.Alabel lbl -> obj "Alabel" [("label", json_label_annot lbl)]
+  | Annot.Acerb cerb -> obj "Acerb" [("cerb", json_cerb_attribute cerb)]
+  | Annot.Avalue v -> obj "Avalue" [("value", json_value_annot v)]
+  | Annot.Ainlined_label (loc, sym, lbl) ->
+      obj "Ainlined_label" [
+        ("loc", json_loc loc);
+        ("symbol", json_sym sym);
+        ("label", json_label_annot lbl)
+      ]
+  | Annot.Astmt -> obj_only "Astmt"
+  | Annot.Aexpr -> obj_only "Aexpr"
+
+let json_annots (annots : Annot.annot list) : Yojson.Safe.t =
+  `List (List.map json_annot annots)
+
+(* Note: json_alignment is defined below with json_ctype due to mutual recursion *)
+
+(* json_integer_type_struct is an alias for json_integer_type_annot defined above *)
+let json_integer_type_struct = json_integer_type_annot
 
 (* Basic types *)
 let json_basic_type (bty : Ctype.basicType) : Yojson.Safe.t =
@@ -205,10 +279,19 @@ let json_basic_type (bty : Ctype.basicType) : Yojson.Safe.t =
       | LongDouble -> `String "LongDouble"
     )]
 
+(* Pass by value or pointer - used in Esave arguments *)
+let json_pass_by (pb : Core.pass_by_value_or_pointer) : Yojson.Safe.t =
+  match pb with
+  | Core.By_pointer -> obj_only "By_pointer"
+  | Core.By_value -> obj_only "By_value"
+
 (* C types - structured representation *)
 let rec json_ctype (ty : Ctype.ctype) : Yojson.Safe.t =
-  let Ctype.Ctype (_, ty_) = ty in
-  json_ctype_ ty_
+  let Ctype.Ctype (annots, ty_) = ty in
+  `Assoc [
+    ("annots", json_annots annots);
+    ("ty", json_ctype_ ty_)
+  ]
 
 and json_ctype_ (ty_ : Ctype.ctype_) : Yojson.Safe.t =
   match ty_ with
@@ -221,8 +304,12 @@ and json_ctype_ (ty_ : Ctype.ctype_) : Yojson.Safe.t =
   | Function ((ret_quals, ret_ty), params, is_variadic) -> obj "Function" [
       ("return_type", json_ctype ret_ty);
       ("return_qualifiers", json_qualifiers ret_quals);
-      ("params", `List (List.map (fun (quals, ty, _is_reg) ->
-        `Assoc [("qualifiers", json_qualifiers quals); ("type", json_ctype ty)]
+      ("params", `List (List.map (fun (quals, ty, is_reg) ->
+        `Assoc [
+          ("qualifiers", json_qualifiers quals);
+          ("type", json_ctype ty);
+          ("is_register", `Bool is_reg)
+        ]
       ) params));
       ("variadic", `Bool is_variadic)
     ]
@@ -238,6 +325,12 @@ and json_ctype_ (ty_ : Ctype.ctype_) : Yojson.Safe.t =
   | Struct sym -> obj "Struct" [("struct_tag", json_sym sym)]
   | Union sym -> obj "Union" [("union_tag", json_sym sym)]
   | Byte -> obj_only "Byte"
+
+(* Alignment specifier - mutually recursive with json_ctype *)
+and json_alignment (align : Ctype.alignment) : Yojson.Safe.t =
+  match align with
+  | Ctype.AlignInteger n -> obj "AlignInteger" [("value", `String (Nat_big_num.to_string n))]
+  | Ctype.AlignType cty -> obj "AlignType" [("ctype", json_ctype cty)]
 
 (* Constructors *)
 let json_ctor = function
@@ -529,11 +622,12 @@ let json_pure_memop (op : Mem_common.pure_memop) : Yojson.Safe.t =
   | Mem_common.IntFromByte -> obj_only "IntFromByte"
 
 (* Pure expressions *)
-let rec json_pexpr (Pexpr (annots, _, pe_)) =
+let rec json_pexpr (Pexpr (annots, bty, pe_)) =
   let loc = match Annot.get_loc annots with
     | Some l -> json_loc l
     | None -> `Null
   in
+  let ty = json_core_base_type bty in
   let content = match pe_ with
     | PEsym sym ->
         obj "PEsym" [("symbol", json_sym sym)]
@@ -655,7 +749,7 @@ let rec json_pexpr (Pexpr (annots, _, pe_)) =
           ("right", json_pexpr pe2)
         ]
   in
-  `Assoc [("loc", loc); ("expr", content)]
+  `Assoc [("loc", loc); ("ty", ty); ("expr", content)]
 
 (* Actions *)
 let json_action_ act_ =
@@ -758,9 +852,11 @@ let json_action_ act_ =
         ("memory_order", json_linux_memory_order mo)
       ]
 
-let json_action (Action (loc, _, act_)) =
+let json_action (Action (loc, (), act_)) =
+  (* footprint is unit in pre-execution AST, serialized as null *)
   `Assoc [
     ("loc", json_loc loc);
+    ("footprint", `Null);
     ("action", json_action_ act_)
   ]
 
@@ -840,14 +936,18 @@ let rec json_expr (Expr (annots, e_)) =
           ("then_branch", json_expr e1);
           ("else_branch", json_expr e2)
         ]
-    | Eccall (_, pe_ty, pe_fn, pes) ->
+    | Eccall ((), pe_ty, pe_fn, pes) ->
+        (* footprint is unit in pre-execution AST, serialized as null *)
         obj "Eccall" [
+          ("footprint", `Null);
           ("type", json_pexpr pe_ty);
           ("function", json_pexpr pe_fn);
           ("args", `List (List.map json_pexpr pes))
         ]
-    | Eproc (_, name, pes) ->
+    | Eproc ((), name, pes) ->
+        (* footprint is unit in pre-execution AST, serialized as null *)
         obj "Eproc" [
+          ("footprint", `Null);
           ("name", json_name name);
           ("args", `List (List.map json_pexpr pes))
         ]
@@ -873,16 +973,24 @@ let rec json_expr (Expr (annots, e_)) =
         obj "Esave" [
           ("label", json_sym sym);
           ("return_type", json_core_base_type bty);
-          ("args", `List (List.map (fun (s, ((bt, _), pe)) ->
+          ("args", `List (List.map (fun (s, ((bt, ctype_pass_by_opt), pe)) ->
             `Assoc [
               ("symbol", json_sym s);
               ("type", json_core_base_type bt);
+              ("ctype_pass_by", match ctype_pass_by_opt with
+                | Some (cty, pb) -> `Assoc [
+                    ("ctype", json_ctype cty);
+                    ("pass_by", json_pass_by pb)
+                  ]
+                | None -> `Null);
               ("value", json_pexpr pe)
             ]) args));
           ("body", json_expr e)
         ]
-    | Erun (_, sym, pes) ->
+    | Erun ((), sym, pes) ->
+        (* footprint is unit in pre-execution AST, serialized as null *)
         obj "Erun" [
+          ("footprint", `Null);
           ("label", json_sym sym);
           ("args", `List (List.map json_pexpr pes))
         ]
@@ -890,10 +998,10 @@ let rec json_expr (Expr (annots, e_)) =
         obj "Epar" [("exprs", `List (List.map json_expr es))]
     | Ewait tid ->
         obj "Ewait" [("thread_id", `Int tid)]
-    | Eannot (_, e) ->
-        obj "Eannot" [("expr", json_expr e)]
-    | Eexcluded (_, act) ->
-        obj "Eexcluded" [("action", json_action act)]
+    | Eannot (_, _) ->
+        failwith "json_core: Eannot expressions are runtime-only and cannot be serialized"
+    | Eexcluded (_, _) ->
+        failwith "json_core: Eexcluded expressions are runtime-only and cannot be serialized"
   in
   `Assoc [("loc", loc); ("expr", content)]
 
@@ -902,18 +1010,35 @@ let json_tag_definition (td : Ctype.tag_definition) : Yojson.Safe.t =
   match td with
   | Ctype.StructDef (fields, flex) ->
       obj "StructDef" [
-        ("fields", `List (List.map (fun (id, (_, _, _, cty)) ->
-          `Assoc [("name", json_identifier id); ("ctype", json_ctype cty)]
+        ("fields", `List (List.map (fun (id, (attrs, align_opt, quals, cty)) ->
+          `Assoc [
+            ("name", json_identifier id);
+            ("attrs", json_attributes attrs);
+            ("alignment", match align_opt with Some a -> json_alignment a | None -> `Null);
+            ("qualifiers", json_qualifiers quals);
+            ("ctype", json_ctype cty)
+          ]
         ) fields));
         ("flexible_array", match flex with
-          | Some (Ctype.FlexibleArrayMember (_, id, _, cty)) ->
-              `Assoc [("name", json_identifier id); ("ctype", json_ctype cty)]
+          | Some (Ctype.FlexibleArrayMember (attrs, id, quals, cty)) ->
+              `Assoc [
+                ("attrs", json_attributes attrs);
+                ("name", json_identifier id);
+                ("qualifiers", json_qualifiers quals);
+                ("ctype", json_ctype cty)
+              ]
           | None -> `Null)
       ]
   | Ctype.UnionDef fields ->
       obj "UnionDef" [
-        ("fields", `List (List.map (fun (id, (_, _, _, cty)) ->
-          `Assoc [("name", json_identifier id); ("ctype", json_ctype cty)]
+        ("fields", `List (List.map (fun (id, (attrs, align_opt, quals, cty)) ->
+          `Assoc [
+            ("name", json_identifier id);
+            ("attrs", json_attributes attrs);
+            ("alignment", match align_opt with Some a -> json_alignment a | None -> `Null);
+            ("qualifiers", json_qualifiers quals);
+            ("ctype", json_ctype cty)
+          ]
         ) fields))
       ]
 
@@ -940,9 +1065,12 @@ let json_fun_map_decl decl =
         ("return_type", json_core_base_type ret_ty);
         ("param_types", `List (List.map json_core_base_type param_tys))
       ]
-  | Proc (loc, _mrk, ret_ty, params, body) ->
+  | Proc (loc, marker, ret_ty, params, body) ->
       obj "Proc" [
         ("loc", json_loc loc);
+        ("marker", match marker with
+          | Some n -> `Int n
+          | None -> `Null);
         ("return_type", json_core_base_type ret_ty);
         ("params", `List (List.map (fun (sym, bty) ->
           `Assoc [("symbol", json_sym sym); ("type", json_core_base_type bty)]
@@ -990,8 +1118,14 @@ let json_cerb_magic_attrs (Annot.Attrs attrs) : Yojson.Safe.t =
   let magic_args = List.concat_map (fun attr ->
     match (attr.Annot.attr_ns, attr.Annot.attr_id) with
     | (Some (Symbol.Identifier (_, "cerb")), Symbol.Identifier (_, "magic")) ->
-        List.map (fun (loc, arg, _) ->
-          `Assoc [("loc", json_loc loc); ("text", `String arg)]
+        List.map (fun (loc, arg, extra_args) ->
+          `Assoc [
+            ("loc", json_loc loc);
+            ("text", `String arg);
+            ("extra_args", `List (List.map (fun (eloc, etext) ->
+              `Assoc [("loc", json_loc eloc); ("text", `String etext)]
+            ) extra_args))
+          ]
         ) attr.Annot.attr_args
     | _ -> []
   ) attrs
@@ -1059,7 +1193,7 @@ let json_extern extern =
   ) (Pmap.bindings_list extern))
 
 (* Top-level file - mirrors pp_file in pp_core.ml *)
-let json_file (file : ('bty, 'a) generic_file) : Yojson.Safe.t =
+let json_file (file : (core_base_type, unit) generic_file) : Yojson.Safe.t =
   let main_json = match file.main with
     | Some sym -> json_sym sym
     | None -> `Null
