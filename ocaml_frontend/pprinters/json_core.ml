@@ -69,10 +69,16 @@ let json_loc (loc : Cerb_location.t) : Yojson.Safe.t =
 (* Helper to convert PPrint document to string *)
 let pp_to_string doc = Pp_utils.to_plain_string doc
 
+(* Helper: convert a digest to hex string, handling uninitialized digests.
+   Cerb_fresh.digest() starts as "" and is set to a valid 16-byte MD5 hash
+   via set_digest(filename). Digest.to_hex requires exactly 16 bytes. *)
+let json_digest (d : Digest.t) : Yojson.Safe.t =
+  if String.length d = 16 then `String (Digest.to_hex d) else `String ""
+
 (* Symbols and identifiers - matches pp_symbol.ml to_string_pretty *)
 let json_sym (sym : Symbol.sym) : Yojson.Safe.t =
   (* Must match pp_symbol.ml to_string_pretty for consistency *)
-  let Symbol.Symbol (_, n, sd) = sym in
+  let Symbol.Symbol (d, n, sd) = sym in
   let name = match sd with
     | Symbol.SD_Id name
     | Symbol.SD_ObjectAddress name
@@ -86,14 +92,15 @@ let json_sym (sym : Symbol.sym) : Yojson.Safe.t =
   in
   `Assoc [
     ("id", `Int n);
-    ("name", `String name)
+    ("name", `String name);
+    ("digest", json_digest d)
   ]
 
 (* Symbols for object types (struct/union in BTy_loaded, BTy_object)
    Matches pp_symbol.ml to_string (NOT to_string_pretty)
    pp_core.ml pp_core_object_type uses: !^(Pp_symbol.to_string ident) *)
 let json_object_type_sym (sym : Symbol.sym) : Yojson.Safe.t =
-  let Symbol.Symbol (_, n, sd) = sym in
+  let Symbol.Symbol (d, n, sd) = sym in
   let name = match sd with
     | Symbol.SD_Id str
     | Symbol.SD_ObjectAddress str
@@ -103,7 +110,8 @@ let json_object_type_sym (sym : Symbol.sym) : Yojson.Safe.t =
   in
   `Assoc [
     ("id", `Int n);
-    ("name", `String name)
+    ("name", `String name);
+    ("digest", json_digest d)
   ]
 
 let json_identifier (Symbol.Identifier (_, name)) : Yojson.Safe.t =
@@ -635,8 +643,14 @@ let rec json_pexpr (Pexpr (annots, bty, pe_)) =
         obj "PEimpl" [("constant", `String (Implementation.string_of_implementation_constant ic))]
     | PEval v ->
         obj "PEval" [("value", json_value v)]
-    | PEconstrained _ ->
-        obj_only "PEconstrained"
+    | PEconstrained cpes ->
+        obj "PEconstrained" [
+          ("constraints", `List (List.map (fun (mc, pe) ->
+            `Assoc [
+              ("constraint", `String (String_mem.string_of_iv_memory_constraint mc));
+              ("expr", json_pexpr pe)
+            ]) cpes))
+        ]
     | PEundef (loc, ub) ->
         obj "PEundef" [
           ("loc", json_loc loc);
@@ -1192,6 +1206,32 @@ let json_extern extern =
     ]
   ) (Pmap.bindings_list extern))
 
+(* Calling convention *)
+let json_calling_convention = function
+  | Normal_callconv -> `String "Normal"
+  | Inner_arg_callconv -> `String "InnerArg"
+
+(* Loop attributes - maps loop_id to loop_attribute record *)
+let json_loop_attributes las =
+  `List (List.map (fun (loop_id, (la : Annot.loop_attribute)) ->
+    `Assoc [
+      ("loop_id", `Int loop_id);
+      ("marker_id", `Int la.Annot.marker_id);
+      ("attributes", json_attributes la.Annot.attributes);
+      ("loc_condition", json_loc la.Annot.loc_condition);
+      ("loc_loop", json_loc la.Annot.loc_loop)
+    ]) (Pmap.bindings_list las))
+
+(* Visible objects environment - maps marker scope to visible (sym, ctype) pairs *)
+let json_visible_objects_env env =
+  `List (List.map (fun (n, objects) ->
+    `Assoc [
+      ("marker_id", `Int n);
+      ("objects", `List (List.map (fun (sym, cty) ->
+        `Assoc [("symbol", json_sym sym); ("ctype", json_ctype cty)]
+      ) objects))
+    ]) (Pmap.bindings_list env))
+
 (* Top-level file - mirrors pp_file in pp_core.ml *)
 let json_file (file : (core_base_type, unit) generic_file) : Yojson.Safe.t =
   let main_json = match file.main with
@@ -1207,13 +1247,16 @@ let json_file (file : (core_base_type, unit) generic_file) : Yojson.Safe.t =
   let funinfo_json = json_funinfo file.funinfo in
   `Assoc [
     ("main", main_json);
+    ("calling_convention", json_calling_convention file.calling_convention);
     ("tagDefs", tagdefs_json);
     ("stdlib", stdlib_json);
     ("impl", impl_json);
     ("globs", globs_json);
     ("funs", funs_json);
     ("extern", extern_json);
-    ("funinfo", funinfo_json)
+    ("funinfo", funinfo_json);
+    ("loop_attributes", json_loop_attributes file.loop_attributes0);
+    ("visible_objects_env", json_visible_objects_env file.visible_objects_env)
   ]
 
 end (* Make *)
