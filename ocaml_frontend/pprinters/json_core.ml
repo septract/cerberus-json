@@ -763,7 +763,7 @@ let rec json_pexpr (Pexpr (annots, bty, pe_)) =
           ("right", json_pexpr pe2)
         ]
   in
-  `Assoc [("loc", loc); ("ty", ty); ("expr", content)]
+  `Assoc [("loc", loc); ("ty", ty); ("annots", json_annots annots); ("expr", content)]
 
 (* Actions *)
 let json_action_ act_ =
@@ -1017,7 +1017,7 @@ let rec json_expr (Expr (annots, e_)) =
     | Eexcluded (_, _) ->
         failwith "json_core: Eexcluded expressions are runtime-only and cannot be serialized"
   in
-  `Assoc [("loc", loc); ("expr", content)]
+  `Assoc [("loc", loc); ("annots", json_annots annots); ("expr", content)]
 
 (* Tag definitions *)
 let json_tag_definition (td : Ctype.tag_definition) : Yojson.Safe.t =
