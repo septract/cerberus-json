@@ -18,6 +18,9 @@ DUNEFLAGS = --profile=$(PROFILE)
 ifdef PROFILING
     DUNEFLAGS += --workspace=dune-workspace.profiling
 endif
+ifdef COVERAGE
+    DUNEFLAGS += --workspace=dune-workspace.coverage
+endif
 
 # Trick to avoid printing the commands.
 # To enable the printing of commands, use [make Q= ...],
@@ -56,6 +59,11 @@ sibylfs: sibylfs-src
 cerberus: prelude-src
 	@echo "[DUNE] cerberus"
 	$(Q)dune build $(DUNEFLAGS) cerberus-lib.install cerberus.install
+
+.PHONY: cerberus-coverage
+cerberus-coverage: prelude-src
+	@echo "[DUNE] cerberus (with coverage)"
+	$(Q)dune build --workspace=dune-workspace.coverage cerberus-lib.install cerberus.install
 
 .PHONY: test
 test: prelude-src

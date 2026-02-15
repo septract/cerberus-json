@@ -3,7 +3,8 @@
  (public_name cerberus)
  (package cerberus)
  (modules main)
- (libraries result cmdliner str unix mem_concrete cerberus-lib.backend_common))
+ (libraries result cmdliner str unix mem_concrete cerberus-lib.backend_common)
+ (instrumentation (backend bisect_ppx)))
 
 ;(executable
 ; (name main_symbolic)
