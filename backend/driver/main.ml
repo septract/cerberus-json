@@ -20,6 +20,23 @@ let is_cheri_memory () =
       | Invalid_argument _ -> false in
   starts_with ~prefix:"cheri" Impl_mem.name
 
+let make_ub_core_file loc ub =
+  let main_sym = Symbol.fresh_pretty "main" in
+  let undef_pe = Core_aux.mk_undef_pe loc ub in
+  let body = Core.Expr ([], Core.Epure undef_pe) in
+  let proc = Core.Proc (Cerb_location.unknown, None, Core.BTy_loaded Core.OTy_integer, [], body) in
+  { Core.main = Some main_sym;
+    Core.calling_convention = Core.Normal_callconv;
+    Core.tagDefs = Pmap.empty compare;
+    Core.stdlib = Pmap.empty compare;
+    Core.impl = Pmap.empty compare;
+    Core.globs = [];
+    Core.funs = Pmap.add main_sym proc (Pmap.empty compare);
+    Core.extern = Pmap.empty compare;
+    Core.funinfo = Pmap.empty compare;
+    Core.loop_attributes0 = Pmap.empty compare;
+    Core.visible_objects_env = Pmap.empty compare; }
+
 let frontend (conf, io) ~is_lib filename core_std =
   if not (Sys.file_exists filename) then
     error ("The file `" ^ filename ^ "' doesn't exist.");
@@ -163,20 +180,6 @@ let cerberus debug_level progress core_obj
   in
   let success = Either.Right 0 in
   let runM = function
-    | Exception.Exception (loc, Errors.(DESUGAR (Desugar_UndefinedBehaviour ub))) when (batch = `Batch || batch = `CharonBatch || batch = `JsonBatch) ->
-        let open Driver_ocaml in
-        print_string begin
-          string_of_batch_output ~json:(batch = `JsonBatch) ~is_charon:(batch = `CharonBatch) None
-            ([], Undefined { ub; stderr= ""; loc })
-        end;
-        epilogue 1
-    | Exception.Exception (loc, Errors.(AIL_TYPING (TypingError.TError_UndefinedBehaviour ub))) when (batch = `Batch || batch = `CharonBatch || batch = `JsonBatch) ->
-        let open Driver_ocaml in
-        print_string begin
-          string_of_batch_output ~json:(batch = `JsonBatch) ~is_charon:(batch = `CharonBatch) None
-            ([], Undefined { ub; stderr= ""; loc })
-        end;
-        epilogue 1
     | Exception.Exception err ->
         prerr_endline (Pp_errors.to_string err);
         epilogue 1
@@ -263,10 +266,19 @@ let cerberus debug_level progress core_obj
         else
           return ()
         end >>= fun () ->
-        prelude >>= main >>= begin function
-          | [] -> assert false
-          | f::fs ->
-            Core_linking.link (f::fs)
+        prelude >>= fun core_std ->
+        begin
+          let pipeline_result = main core_std >>= begin function
+            | [] -> assert false
+            | f::fs ->
+              Core_linking.link (f::fs)
+          end in
+          Exception.bind_exception pipeline_result (function
+            | (loc, Errors.(DESUGAR (Desugar_UndefinedBehaviour ub))) ->
+                return (make_ub_core_file loc ub)
+            | (loc, Errors.(AIL_TYPING (TypingError.TError_UndefinedBehaviour ub))) ->
+                return (make_ub_core_file loc ub)
+            | err -> Exception.fail err)
         end >>= fun core_file ->
         (* JSON Core output - done after linking so libc is included.
            We typecheck to get type annotations on expressions. *)
